@@ -412,3 +412,233 @@ def export_data():
     patient = Patient.query.filter_by(user_id=current_user_id).first()
     task = export_patient_history.delay(patient.id)
     return jsonify({"msg": "Export started", "task_id": task.id}), 202
+
+# ============= NEWLY ADDED MISSING ENDPOINTS =============
+
+# --- Admin: Update Doctor ---
+@bp.route('/api/admin/doctor/<int:id>', methods=['PUT'])
+@jwt_required()
+def update_doctor(id):
+    """Update doctor profile (username, email, specialization)"""
+    claims = get_jwt()
+    if claims['role'] != 'admin':
+        return jsonify({"msg": "Admins only"}), 403
+    
+    doctor = Doctor.query.get_or_404(id)
+    data = request.get_json()
+    
+    # Update user fields
+    if 'username' in data:
+        doctor.user.username = data['username']
+    if 'email' in data:
+        doctor.user.email = data['email']
+    
+    # Update doctor fields
+    if 'specialization' in data:
+        doctor.specialization = data['specialization']
+    
+    db.session.commit()
+    return jsonify({"msg": "Doctor updated successfully"}), 200
+
+# --- Admin: Patient Management ---
+@bp.route('/api/admin/patients', methods=['GET'])
+@jwt_required()
+def admin_list_patients():
+    """List all patients"""
+    claims = get_jwt()
+    if claims['role'] != 'admin':
+        return jsonify({"msg": "Admins only"}), 403
+    
+    patients = Patient.query.all()
+    result = []
+    for p in patients:
+        result.append({
+            "id": p.id,
+            "user_id": p.user_id,
+            "username": p.user.username,
+            "email": p.user.email,
+            "address": p.address
+        })
+    return jsonify(result), 200
+
+@bp.route('/api/admin/patient/<int:id>', methods=['DELETE'])
+@jwt_required()
+def admin_delete_patient(id):
+    """Delete a patient"""
+    claims = get_jwt()
+    if claims['role'] != 'admin':
+        return jsonify({"msg": "Admins only"}), 403
+    
+    patient = Patient.query.get_or_404(id)
+    
+    # Check if patient has any active appointments
+    active_appointments = Appointment.query.filter_by(
+        patient_id=patient.id,
+        status='Booked'
+    ).count()
+    
+    if active_appointments > 0:
+        return jsonify({
+            "msg": f"Cannot delete patient. They have {active_appointments} active appointment(s). Please cancel them first."
+        }), 400
+    
+    # Delete all appointments for this patient
+    Appointment.query.filter_by(patient_id=patient.id).delete()
+    
+    # Delete user (cascades to patient)
+    user = User.query.get(patient.user_id)
+    db.session.delete(user)
+    db.session.commit()
+    return jsonify({"msg": "Patient deleted successfully"}), 200
+
+# --- Patient: Reschedule Appointment ---
+@bp.route('/api/patient/appointment/<int:id>', methods=['PUT'])
+@jwt_required()
+def reschedule_appointment(id):
+    """Reschedule an appointment to a new date/time"""
+    current_user_id = get_jwt_identity()
+    patient = Patient.query.filter_by(user_id=current_user_id).first()
+    
+    if not patient:
+        return jsonify({"msg": "Patient profile not found"}), 404
+    
+    appt = Appointment.query.filter_by(id=id, patient_id=patient.id).first_or_404()
+    
+    # Only allow rescheduling of booked appointments
+    if appt.status != 'Booked':
+        return jsonify({"msg": "Can only reschedule booked appointments"}), 400
+    
+    data = request.get_json()
+    new_date_time = datetime.fromisoformat(data.get('date_time'))
+    
+    # Validate date is in the future
+    if new_date_time < datetime.now():
+        return jsonify({"msg": "Cannot reschedule to a past date"}), 400
+    
+    # Check for conflicts
+    existing_appointment = Appointment.query.filter(
+        Appointment.doctor_id == appt.doctor_id,
+        Appointment.date_time == new_date_time,
+        Appointment.status == 'Booked',
+        Appointment.id != id  # Exclude current appointment
+    ).first()
+    
+    if existing_appointment:
+        return jsonify({"msg": "This time slot is already booked. Please choose another time."}), 400
+    
+    appt.date_time = new_date_time
+    db.session.commit()
+    return jsonify({"msg": "Appointment rescheduled successfully"}), 200
+
+# --- Specializations List ---
+@bp.route('/api/specializations', methods=['GET'])
+def get_specializations():
+    """Get all unique specializations/departments"""
+    specializations = db.session.query(Doctor.specialization).distinct().all()
+    result = [s[0] for s in specializations if s[0]]
+    return jsonify(result), 200
+
+# --- Doctor: Availability Management ---
+@bp.route('/api/doctor/availability', methods=['GET', 'POST'])
+@jwt_required()
+def doctor_availability():
+    """Get or set doctor availability for next 7 days"""
+    current_user_id = get_jwt_identity()
+    doctor = Doctor.query.filter_by(user_id=current_user_id).first()
+    
+    if not doctor:
+        return jsonify({"msg": "Doctor profile not found"}), 404
+    
+    if request.method == 'POST':
+        # Set availability (JSON format: {"2024-01-15": ["09:00", "10:00", "14:00"], ...})
+        data = request.get_json()
+        doctor.availability = json.dumps(data)
+        db.session.commit()
+        return jsonify({"msg": "Availability updated"}), 200
+    
+    # GET - Return availability
+    if doctor.availability:
+        availability_data = json.loads(doctor.availability)
+    else:
+        availability_data = {}
+    
+    return jsonify(availability_data), 200
+
+@bp.route('/api/doctor/<int:doctor_id>/availability', methods=['GET'])
+def get_doctor_availability(doctor_id):
+    """Get availability for a specific doctor (for patients)"""
+    doctor = Doctor.query.get_or_404(doctor_id)
+    
+    if doctor.availability:
+        availability_data = json.loads(doctor.availability)
+    else:
+        availability_data = {}
+    
+    return jsonify(availability_data), 200
+
+# --- Doctor: Enhanced Dashboard Features ---
+@bp.route('/api/doctor/appointments/upcoming', methods=['GET'])
+@jwt_required()
+def doctor_upcoming_appointments():
+    """Get upcoming appointments for doctor (next 7 days)"""
+    current_user_id = get_jwt_identity()
+    doctor = Doctor.query.filter_by(user_id=current_user_id).first()
+    
+    if not doctor:
+        return jsonify({"msg": "Doctor profile not found"}), 404
+    
+    # Get appointments for next 7 days
+    today = datetime.now()
+    next_week = today + timedelta(days=7)
+    
+    appointments = Appointment.query.filter(
+        Appointment.doctor_id == doctor.id,
+        Appointment.status == 'Booked',
+        Appointment.date_time >= today,
+        Appointment.date_time <= next_week
+    ).order_by(Appointment.date_time).all()
+    
+    result = []
+    for a in appointments:
+        result.append({
+            "id": a.id,
+            "patient_name": a.patient.user.username,
+            "patient_id": a.patient.id,
+            "date_time": a.date_time.isoformat(),
+            "status": a.status
+        })
+    return jsonify(result), 200
+
+@bp.route('/api/doctor/patients', methods=['GET'])
+@jwt_required()
+def doctor_patients():
+    """Get list of unique patients assigned to this doctor"""
+    current_user_id = get_jwt_identity()
+    doctor = Doctor.query.filter_by(user_id=current_user_id).first()
+    
+    if not doctor:
+        return jsonify({"msg": "Doctor profile not found"}), 404
+    
+    # Get unique patients who have appointments with this doctor
+    patient_ids = db.session.query(Appointment.patient_id).filter(
+        Appointment.doctor_id == doctor.id
+    ).distinct().all()
+    
+    result = []
+    for pid_tuple in patient_ids:
+        patient = Patient.query.get(pid_tuple[0])
+        if patient:
+            # Count appointments for this patient
+            appt_count = Appointment.query.filter_by(
+                doctor_id=doctor.id,
+                patient_id=patient.id
+            ).count()
+            
+            result.append({
+                "id": patient.id,
+                "username": patient.user.username,
+                "email": patient.user.email,
+                "total_appointments": appt_count
+            })
+    
+    return jsonify(result), 200

@@ -6,6 +6,9 @@ from flask_jwt_extended import JWTManager
 from flask_cors import CORS
 from flask_caching import Cache
 from werkzeug.security import generate_password_hash
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__)
 app.config.from_object(Config)

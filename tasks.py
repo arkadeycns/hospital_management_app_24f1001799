@@ -189,3 +189,23 @@ def export_patient_history(patient_id):
         # send_email(patient.user.email, "Your Treatment History", attachment=filename)
         
         return f"CSV exported: {filename}"
+
+@celery.task
+def generate_all_monthly_reports():
+    """Generate monthly reports for ALL doctors (called by scheduler)"""
+    from app import app
+    from models import Doctor
+    
+    with app.app_context():
+        doctors = Doctor.query.all()
+        reports_generated = 0
+        
+        for doctor in doctors:
+            try:
+                generate_monthly_report.delay(doctor.id)
+                reports_generated += 1
+            except Exception as e:
+                print(f"[ERROR] Failed to generate report for doctor {doctor.id}: {e}")
+        
+        print(f"[MONTHLY REPORTS] Triggered {reports_generated} report generations")
+        return f"Triggered {reports_generated} monthly reports"
