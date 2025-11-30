@@ -1,0 +1,311 @@
+openapi: 3.0.0
+info:
+  title: Hospital Management System API
+  version: 1.0.0
+  description: API documentation for the Hospital Management System
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+security:
+  - bearerAuth: []
+paths:
+  /api/login:
+    post:
+      summary: User Login
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username: {type: string}
+                password: {type: string}
+      responses:
+        '200':
+          description: Successful login
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token: {type: string}
+                  role: {type: string}
+                  username: {type: string}
+
+  /api/register:
+    post:
+      summary: Register New Patient
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username: {type: string}
+                email: {type: string}
+                password: {type: string}
+      responses:
+        '201':
+          description: User created
+
+  # --- Admin Endpoints ---
+  /api/admin/stats:
+    get:
+      summary: Get Dashboard Statistics
+      responses:
+        '200':
+          description: Stats data
+
+  /api/admin/doctors:
+    get:
+      summary: List All Doctors
+      responses:
+        '200':
+          description: List of doctors
+    post:
+      summary: Add New Doctor
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username: {type: string}
+                email: {type: string}
+                password: {type: string}
+                specialization: {type: string}
+      responses:
+        '201':
+          description: Doctor added
+
+  /api/admin/doctor/{id}:
+    put:
+      summary: Update Doctor
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: integer}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username: {type: string}
+                email: {type: string}
+                specialization: {type: string}
+      responses:
+        '200':
+          description: Updated
+    delete:
+      summary: Delete Doctor
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: integer}
+      responses:
+        '200':
+          description: Deleted
+
+  /api/admin/patients:
+    get:
+      summary: List All Patients
+      responses:
+        '200':
+          description: List of patients
+
+  /api/admin/patient/{id}:
+    delete:
+      summary: Delete Patient
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: integer}
+      responses:
+        '200':
+          description: Deleted
+
+  /api/admin/appointments:
+    get:
+      summary: List All Appointments
+      responses:
+        '200':
+          description: List of appointments
+
+  # --- Doctor Endpoints ---
+  /api/doctor/appointments:
+    get:
+      summary: Get Doctor's Appointments
+      responses:
+        '200':
+          description: List of appointments
+
+  /api/doctor/appointments/upcoming:
+    get:
+      summary: Get Upcoming Appointments (7 Days)
+      responses:
+        '200':
+          description: List of appointments
+
+  /api/doctor/appointment/{id}:
+    put:
+      summary: Update Appointment (Diagnosis/Prescription)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: integer}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: {type: string}
+                diagnosis: {type: string}
+                prescription: {type: string}
+      responses:
+        '200':
+          description: Updated
+
+  /api/doctor/availability:
+    get:
+      summary: Get Own Availability
+      responses:
+        '200':
+          description: Availability JSON
+    post:
+      summary: Set Availability
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              description: JSON object with dates as keys and list of times as values
+      responses:
+        '200':
+          description: Updated
+
+  /api/doctor/patients:
+    get:
+      summary: Get Assigned Patients
+      responses:
+        '200':
+          description: List of patients
+
+  # --- Patient Endpoints ---
+  /api/patient/doctors:
+    get:
+      summary: List Approved Doctors
+      security: []
+      responses:
+        '200':
+          description: List of doctors
+
+  /api/patient/book:
+    post:
+      summary: Book Appointment
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                doctor_id: {type: integer}
+                date_time: {type: string, format: date-time}
+      responses:
+        '201':
+          description: Booked
+
+  /api/patient/appointments:
+    get:
+      summary: Get My Appointments
+      responses:
+        '200':
+          description: List of appointments
+
+  /api/patient/appointment/{id}:
+    put:
+      summary: Reschedule Appointment
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: integer}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                date_time: {type: string, format: date-time}
+      responses:
+        '200':
+          description: Rescheduled
+    delete:
+      summary: Cancel Appointment
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: integer}
+      responses:
+        '200':
+          description: Cancelled
+
+  /api/patient/profile:
+    get:
+      summary: Get Profile
+      responses:
+        '200':
+          description: Profile data
+    put:
+      summary: Update Profile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email: {type: string}
+                address: {type: string}
+      responses:
+        '200':
+          description: Updated
+
+  /api/patient/export:
+    post:
+      summary: Export History to CSV
+      responses:
+        '202':
+          description: Task started
+
+  # --- General ---
+  /api/specializations:
+    get:
+      summary: Get All Specializations
+      security: []
+      responses:
+        '200':
+          description: List of strings
+
+  /api/doctor/{id}/availability:
+    get:
+      summary: Get Specific Doctor Availability
+      security: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: integer}
+      responses:
+        '200':
+          description: Availability JSON
