@@ -1,10 +1,21 @@
 from flask import Blueprint, render_template, jsonify, request
-from models import db, User, Doctor, Patient, Appointment, Department
+from models import db, User, Doctor, Patient, Appointment
 from werkzeug.security import check_password_hash, generate_password_hash
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity, get_jwt
 from datetime import datetime, date, timedelta
 import json
 from tasks import export_patient_history
+from functools import wraps
+
+def admin_required(fn):
+    @wraps(fn)
+    @jwt_required()
+    def wrapper(*args, **kwargs):
+        claims = get_jwt()
+        if claims['role'] != 'admin':
+            return jsonify({"msg": "Admins only"}), 403
+        return fn(*args, **kwargs)
+    return wrapper
 
 bp = Blueprint('main', __name__)
 
@@ -43,11 +54,8 @@ def register():
 
 # --- Admin ---
 @bp.route('/api/admin/stats', methods=['GET'])
-@jwt_required()
+@admin_required
 def admin_stats():
-    claims = get_jwt()
-    if claims['role'] != 'admin':
-        return jsonify({"msg": "Admins only"}), 403
     
     total_doctors = Doctor.query.count()
     total_patients = Patient.query.count()
@@ -66,11 +74,8 @@ def admin_stats():
     }), 200
 
 @bp.route('/api/admin/doctors', methods=['GET', 'POST'])
-@jwt_required()
+@admin_required
 def manage_doctors():
-    claims = get_jwt()
-    if claims['role'] != 'admin':
-        return jsonify({"msg": "Admins only"}), 403
         
     if request.method == 'POST':
         data = request.get_json()
@@ -100,23 +105,26 @@ def manage_doctors():
     return jsonify(result), 200
 
 @bp.route('/api/admin/doctor/<int:id>', methods=['DELETE'])
-@jwt_required()
+@admin_required
 def delete_doctor(id):
-    claims = get_jwt()
-    if claims['role'] != 'admin':
-        return jsonify({"msg": "Admins only"}), 403
     doctor = Doctor.query.get_or_404(id)
+    
+    # Check for active appointments
+    active_appts = Appointment.query.filter_by(doctor_id=doctor.id, status='Booked').count()
+    if active_appts > 0:
+        return jsonify({"msg": f"Cannot delete doctor. They have {active_appts} active appointment(s). Please reassign or cancel them first."}), 400
+        
+    # Delete all past appointments (required due to Foreign Key constraints)
+    Appointment.query.filter_by(doctor_id=doctor.id).delete()
+    
     user = User.query.get(doctor.user_id)
     db.session.delete(user)
     db.session.commit()
-    return jsonify({"msg": "Doctor deleted"}), 200
+    return jsonify({"msg": "Doctor deleted successfully"}), 200
 
 @bp.route('/api/admin/appointments', methods=['GET'])
-@jwt_required()
+@admin_required
 def admin_appointments():
-    claims = get_jwt()
-    if claims['role'] != 'admin':
-        return jsonify({"msg": "Admins only"}), 403
     appointments = Appointment.query.all()
     result = []
     for a in appointments:
@@ -131,11 +139,8 @@ def admin_appointments():
 
 # Search endpoints
 @bp.route('/api/admin/search/doctors', methods=['GET'])
-@jwt_required()
+@admin_required
 def search_doctors_admin():
-    claims = get_jwt()
-    if claims['role'] != 'admin':
-        return jsonify({"msg": "Admins only"}), 403
     
     query = request.args.get('q', '').lower()
     specialization = request.args.get('specialization', '').lower()
@@ -157,11 +162,8 @@ def search_doctors_admin():
     return jsonify(result), 200
 
 @bp.route('/api/admin/search/patients', methods=['GET'])
-@jwt_required()
+@admin_required
 def search_patients():
-    claims = get_jwt()
-    if claims['role'] != 'admin':
-        return jsonify({"msg": "Admins only"}), 403
     
     query = request.args.get('q', '').lower()
     
@@ -417,12 +419,9 @@ def export_data():
 
 # --- Admin: Update Doctor ---
 @bp.route('/api/admin/doctor/<int:id>', methods=['PUT'])
-@jwt_required()
+@admin_required
 def update_doctor(id):
     """Update doctor profile (username, email, specialization)"""
-    claims = get_jwt()
-    if claims['role'] != 'admin':
-        return jsonify({"msg": "Admins only"}), 403
     
     doctor = Doctor.query.get_or_404(id)
     data = request.get_json()
@@ -442,12 +441,9 @@ def update_doctor(id):
 
 # --- Admin: Patient Management ---
 @bp.route('/api/admin/patients', methods=['GET'])
-@jwt_required()
+@admin_required
 def admin_list_patients():
     """List all patients"""
-    claims = get_jwt()
-    if claims['role'] != 'admin':
-        return jsonify({"msg": "Admins only"}), 403
     
     patients = Patient.query.all()
     result = []
@@ -462,12 +458,9 @@ def admin_list_patients():
     return jsonify(result), 200
 
 @bp.route('/api/admin/patient/<int:id>', methods=['DELETE'])
-@jwt_required()
+@admin_required
 def admin_delete_patient(id):
     """Delete a patient"""
-    claims = get_jwt()
-    if claims['role'] != 'admin':
-        return jsonify({"msg": "Admins only"}), 403
     
     patient = Patient.query.get_or_404(id)
     
